@@ -1,0 +1,161 @@
+name: A pipeline for building and deploying the Botfront
+
+resources:
+  - repo: self
+
+trigger:
+  branches:
+    include:
+      - main
+      - dev
+      - feat-*
+      - feat/*
+  paths:
+    # Paths/files if updated, won't by themselves trigger a deployment
+    exclude:
+      - README.md
+      - cli/*
+      - docs/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  isProd: $[eq(variables['Build.SourceBranch'], 'refs/heads/main')]
+  isTest: $[eq(variables['Build.SourceBranch'], 'refs/heads/dev')]
+
+  azureSubscriptionEndpointTest: tku-palveluohjain-testi-sc
+  azureSubscriptionEndpointProd: tku-palveluohjain-tuotanto-sc
+  azurestorageaccountnameTest: tkupaohteststorage
+  azurestorageaccountnameProd: tkupaohtuotstorage
+  azureContainerRegistryTest: tkupaohtestcontainerregistry.azurecr.io
+  azureContainerRegistryProd: tkupaohtuotcontainerregistry.azurecr.io
+  dockerRegistryEndpointTest: tku-palveluohjain-testi-docker-sc
+  dockerRegistryEndpointProd: tku-palveluohjain-tuotanto-docker-sc
+  kubernetesServiceConnectionTest: tku-palveluohjain-testi-aks-sc
+  kubernetesServiceConnectionProd: tku-palveluohjain-tuotanto-aks-sc
+
+  imageRepository: botfront
+  dockerfilePath: '$(System.DefaultWorkingDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+stages:
+  - stage: BuildTest
+    displayName: Build Botfront for test environment
+    condition: eq(variables.isTest, true)
+    variables:
+      - group: tku-paoh-test-variable-group
+    jobs:
+      - job: BuildBotfront
+        steps:
+          # Build and push Docker image
+          - task: Docker@2
+            displayName: 'Build and push an image to container registry'
+            inputs:
+              command: buildAndPush
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryEndpointTest)
+              tags: |
+                $(tag)
+
+  - stage: BuildProd
+    displayName: Build Botfront for prod environment
+    condition: eq(variables.isProd, true)
+    variables:
+      - group: tku-paoh-tuot-variable-group
+    jobs:
+      - job: BuildBotfront
+        steps:
+          # Build and push Docker image
+          - task: Docker@2
+            displayName: 'Build and push an image to container registry'
+            inputs:
+              command: buildAndPush
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryEndpointProd)
+              tags: |
+                $(tag)
+
+  - stage: DeployTest
+    displayName: Deploy Botfront to test environment
+    variables:
+      - group: tku-paoh-test-variable-group
+    dependsOn: BuildTest
+    condition: eq(variables.isTest, true)
+    jobs:
+      - job: DeployBotfront
+        displayName: 'Deploy Botfront to AKS'
+        steps:
+          - task: KubernetesManifest@0
+            displayName: Create ImagePullSecret
+            inputs:
+              action: createSecret
+              namespace: default
+              kubernetesServiceConnection: $(kubernetesServiceConnectionTest)
+              secretName: testimagepullsecret
+              dockerRegistryEndpoint: $(dockerRegistryEndpointTest)
+      
+          - task: replacetokens@3
+            displayName: 'Replace tokens in .yaml files'
+            inputs:
+              targetFiles: |
+                $(Build.SourcesDirectory)/kube/*.yaml
+              verbosity: detailed
+              tokenPrefix: '__'
+              tokenSuffix: '__'
+              
+          - task: KubernetesManifest@0
+            displayName: Deploy to Kubernetes test environment cluster
+            inputs:
+              action: deploy
+              namespace: default
+              kubernetesServiceConnection: $(kubernetesServiceConnectionTest)
+              manifests: |
+                $(Build.SourcesDirectory)/kube/*.yaml
+              imagePullSecrets: |
+                testimagepullsecret
+              containers: |
+                '$(azureContainerRegistryTest)/$(imageRepository):$(tag)'
+
+  - stage: DeployProd
+    displayName: Deploy Botfront to prod environment
+    variables:
+      - group: tku-paoh-tuot-variable-group
+    dependsOn: BuildProd
+    condition: eq(variables.isProd, true)
+    jobs:
+      - job: DeployBotfront
+        displayName: 'Deploy Botfront to AKS'
+        steps:
+          - task: KubernetesManifest@0
+            displayName: Create ImagePullSecret
+            inputs:
+              action: createSecret
+              namespace: default
+              kubernetesServiceConnection: $(kubernetesServiceConnectionProd)
+              secretName: prodimagepullsecret
+              dockerRegistryEndpoint: $(dockerRegistryEndpointProd)
+      
+          - task: replacetokens@3
+            displayName: 'Replace tokens in .yaml files'
+            inputs:
+              targetFiles: |
+                $(Build.SourcesDirectory)/kube/*.yaml
+              verbosity: detailed
+              tokenPrefix: '__'
+              tokenSuffix: '__'
+              
+          - task: KubernetesManifest@0
+            displayName: Deploy to Kubernetes prod environment cluster
+            inputs:
+              action: deploy
+              namespace: default
+              kubernetesServiceConnection: $(kubernetesServiceConnectionProd)
+              manifests: |
+                $(Build.SourcesDirectory)/kube/*.yaml
+              imagePullSecrets: |
+                prodimagepullsecret
+              containers: |
+                '$(azureContainerRegistryProd)/$(imageRepository):$(tag)'

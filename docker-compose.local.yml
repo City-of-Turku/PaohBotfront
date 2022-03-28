@@ -1,0 +1,33 @@
+######################################################################################################
+# Botfront with MongoDB docker-compose for local use                                                 #
+######################################################################################################
+
+version: '3.0'
+services:
+  botfront:
+    build: .
+    container_name: botfront
+    restart: always
+    ports:
+      - '3000:3000'
+    depends_on:
+      - mongo
+    environment:
+      PORT: 3000
+      ROOT_URL: http://localhost:3000
+      MONGO_URL: mongodb://user:password@host.docker.internal:27017/bf?authSource=admin
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  mongo:
+    image: mongo:4.4
+    container_name: botfront-mongo
+    restart: always
+    volumes:
+      - botfront-db:/data/db
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user
+      MONGO_INITDB_ROOT_PASSWORD: password   
+volumes:
+  botfront-db:

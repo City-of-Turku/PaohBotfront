@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: C:\WINDOWS\kompose.exe convert
+    kompose.version: 1.21.0 (992df58d8)
+  creationTimestamp: null
+  labels:
+    io.kompose.service: botfront
+  name: botfront
+spec:
+  progressDeadlineSeconds: 900
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: botfront
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: C:\WINDOWS\kompose.exe convert
+        kompose.version: 1.21.0 (992df58d8)
+      creationTimestamp: null
+      labels:
+        io.kompose.service: botfront
+    spec:
+      containers:
+      - env:
+        - name: MONGO_URL
+          value: mongodb://__mongousername__:__mongopassword__@__mongohost__:__mongoport__/__bfmongodb__?ssl=true&tlsInsecure=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@__mongousername__@
+        - name: PORT
+          value: "3000"
+        - name: ROOT_URL
+          value: __botfrontrooturl__
+        - name: API_KEY
+          value: __botfrontauthtoken__
+        image: __dockerregistryname__.azurecr.io/__imageRepository__:__tag__
+        imagePullPolicy: Always
+        name: botfront
+        ports:
+        - containerPort: 3000
+        resources:
+          requests:
+            memory: "1G"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 60
+          timeoutSeconds: 10
+        # volumeMounts:
+        # - mountPath: /app/models
+        #   name: models
+      restartPolicy: Always
+      serviceAccountName: ""
+      # volumes:
+      # - name: models
+      #   persistentVolumeClaim:
+      #     claimName: fileshare-botfront-models
+status: {}
